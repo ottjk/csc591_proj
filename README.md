@@ -1,2 +1,2 @@
 # csc591_proj
-Graph coloring on qiskit
+Using quantum computers and VQE/QAOA to solve a graph coloring problem.
