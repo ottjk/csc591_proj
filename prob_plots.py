@@ -23,5 +23,6 @@ n_vertices = 6
 graph = [(0,1),(0,2),(0,3),(0,4),(0,5),(1,2),(2,3),(3,4),(4,5),(5,1)]
 qc_6 = QC(graph, n_vertices, n_layers)
 
+# uncomment which one you want
 # get_probs(qc_5)
 get_probs(qc_6)
