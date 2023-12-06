@@ -2,83 +2,93 @@ import pennylane as qml
 from pennylane import numpy as np
 from rich.progress import track
 
-n_vertices = 5
-n_wires = 2*n_vertices
-n_layers = 3
+def generate_hamiltonian(graph):
+    cost_hamiltonian = sum(qml.Hamiltonian([1/4,1/4,1/4], [
+        qml.PauliZ(2*edge[0]) @ qml.PauliZ(2*edge[1]),
+        qml.PauliZ(2*edge[0]+1) @ qml.PauliZ(2*edge[1]+1),
+        qml.PauliZ(2*edge[0]) @ qml.PauliZ(2*edge[0]+1) @ qml.PauliZ(2*edge[1]) @ qml.PauliZ(2*edge[1]+1)
+    ]) for edge in graph)
+    return cost_hamiltonian
 
-graph = [(0,1),(0,2),(0,3),(0,4),(1,2),(1,3),(2,3),(2,4),(3,4)]
+class QC:
+    def __init__(self, graph, n_vertices, n_layers):
+        self.graph = graph
+        self.n_vertices = n_vertices
+        self.n_wires = 2*n_vertices
+        self.n_layers = n_layers
+        self.hamiltonian = generate_hamiltonian(graph)
+        self.dev = qml.device("default.qubit", wires=self.n_wires)
 
-cost_hamiltonian = sum(qml.Hamiltonian([1,1,1], [
-    qml.PauliZ(2*edge[0]) @ qml.PauliZ(2*edge[1]),
-    qml.PauliZ(2*edge[0]+1) @ qml.PauliZ(2*edge[1]+1),
-    qml.PauliZ(2*edge[0]) @ qml.PauliZ(2*edge[0]+1) @ qml.PauliZ(2*edge[1]) @ qml.PauliZ(2*edge[1]+1)
-]) for edge in graph)
+    # unitary operator U_B with parameter beta
+    def U_B(self, beta):
+        for wire in range(self.n_wires):
+            qml.RX(beta, wires=wire)
 
-# unitary operator U_B with parameter beta
-def U_B(beta):
-    for wire in range(n_wires):
-        qml.RX(2 * beta, wires=wire)
+    # unitary operator U_C with parameter gamma
+    def U_C(self, gamma):
+        for edge in self.graph:
+            wire1 = 2*edge[0]
+            wire2 = wire1+1
+            wire3 = 2*edge[1]
+            wire4 = wire3+1
 
-# unitary operator U_C with parameter gamma
-def U_C(gamma):
-    for edge in graph:
-        wire1 = 2*edge[0]
-        wire2 = wire1+1
-        wire3 = 2*edge[1]
-        wire4 = wire3+1
+            qml.CNOT(wires=[wire1, wire3])
+            qml.RZ(gamma/4, wires=wire3)
+            qml.CNOT(wires=[wire1, wire3])
 
-        qml.CNOT(wires=[wire1, wire3])
-        qml.RZ(gamma, wires=wire3)
-        qml.CNOT(wires=[wire1, wire3])
+            qml.CNOT(wires=[wire2, wire4])
+            qml.RZ(gamma/4, wires=wire4)
+            qml.CNOT(wires=[wire2, wire4])
 
-        qml.CNOT(wires=[wire2, wire4])
-        qml.RZ(gamma, wires=wire4)
-        qml.CNOT(wires=[wire2, wire4])
+            qml.CNOT(wires=[wire1, wire4])
+            qml.CNOT(wires=[wire2, wire4])
+            qml.CNOT(wires=[wire3, wire4])
+            qml.RZ(gamma/4, wires=wire4)
+            qml.CNOT(wires=[wire3, wire4])
+            qml.CNOT(wires=[wire2, wire4])
+            qml.CNOT(wires=[wire1, wire4])
 
-        qml.CNOT(wires=[wire1, wire4])
-        qml.CNOT(wires=[wire2, wire4])
-        qml.CNOT(wires=[wire3, wire4])
-        qml.RZ(gamma, wires=wire4)
-        qml.CNOT(wires=[wire3, wire4])
-        qml.CNOT(wires=[wire2, wire4])
-        qml.CNOT(wires=[wire1, wire4])
+    def circuit(self, gammas, betas):
+        for wire in range(self.n_wires):
+            qml.PauliX(wire)
+            qml.Hadamard(wires=wire)
 
-def circuit(gammas, betas):
-    for wire in range(n_wires):
-        qml.Hadamard(wires=wire)
+        for i in range(self.n_layers):
+            self.U_C(gammas[i])
+            self.U_B(betas[i])
+    
+    def cost_function(self):
+        @qml.qnode(self.dev)
+        def _cost_function(params):
+            self.circuit(params[0], params[1])
+            return qml.expval(self.hamiltonian)
+        return _cost_function
 
-    for i in range(n_layers):
-        U_C(gammas[i])
-        U_B(betas[i])
+    def probability_circuit(self, params):
+        @qml.qnode(self.dev)
+        def _probability_circuit(params):
+            self.circuit(params[0], params[1])
+            return qml.probs()
+        return _probability_circuit(params)
 
-dev = qml.device("default.qubit", wires=n_wires)
+    def h_exp(self):
+        @qml.qnode(self.dev)
+        def _h_exp():
+            return qml.expval(self.hamiltonian)
+        return _h_exp()
 
-@qml.qnode(dev)
-def cost_function(params):
-    circuit(params[0], params[1])
-    return qml.expval(cost_hamiltonian)
+    def qaoa_color(self):
+        gammas = np.linspace(0, 1, num=self.n_layers)
+        betas = np.linspace(1, 0, num=self.n_layers)
+        params = np.array([gammas,betas])
 
-@qml.qnode(dev)
-def probability_circuit(params):
-    circuit(params[0], params[1])
-    return qml.probs()
+        opt = qml.QNSPSAOptimizer()
 
-def qaoa_color():
-    params = np.random.rand(2, n_layers, requires_grad=True)
-    print(params)
+        steps = 10
+        for i in track(range(steps)):
+            params, cost = opt.step_and_cost(self.cost_function(), params)
+            probs = self.probability_circuit(params)
 
-    opt = qml.QNSPSAOptimizer()
+            print(f"{cost: .7f}, {np.argmax(probs):0{self.n_wires}b}")
 
-    steps = 200
-    for i in track(range(steps)):
-        params, cost = opt.step_and_cost(cost_function, params)
-        probs = probability_circuit(params)
-        print("{: .7f}, {:010b}".format(cost, np.argmax(probs)))
-
-    return params
-
-@qml.qnode(dev)
-def h_exp():
-    return qml.expval(cost_hamiltonian)
-
-params = qaoa_color()
+        return params

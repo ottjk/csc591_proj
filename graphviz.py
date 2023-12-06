@@ -5,8 +5,9 @@
 COLORS = ['#1E88E5', '#D81B60', '#FFC107', '#004D40']
 USE_EDGE_COLORS = False
 
+graph = [(0,1),(0,2),(0,3),(0,4),(0,5),(1,2),(2,3),(3,4),(4,5),(5,1)]
 graph = [(0,1),(0,2),(0,3),(0,4),(1,2),(1,3),(2,3),(2,4),(3,4)]
-coloring = '0011011011'
+coloring = '0001101101'
 
 node_count = len(coloring) // 2
 node_colors = [COLORS[int(coloring[i*2:i*2+2], 2)] for i in range(node_count)]
